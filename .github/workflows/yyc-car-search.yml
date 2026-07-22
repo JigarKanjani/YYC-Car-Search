@@ -1,0 +1,57 @@
+name: YYC Car Search - Every 6 Hours
+
+on:
+  schedule:
+    - cron: '45 */6 * * *'   # every 6 hours (offset from the other bots)
+  workflow_dispatch:          # Manual trigger from GitHub UI
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: write          # Needed to commit the tracker file back
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Calgary used-car scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_CARS: ${{ secrets.TELEGRAM_CHAT_ID_CARS }}
+          # Managed scraper (set ONE to get past AutoTrader.ca bot protection
+          # on GitHub's datacenter IPs). Reuse the same keys as the other bots.
+          SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
+          SCRAPEDO_TOKEN: ${{ secrets.SCRAPEDO_TOKEN }}
+          CAR_PROXY: ${{ secrets.CAR_PROXY }}
+          # Filters
+          CAR_MAX_PRICE: '18000'
+          CAR_MAX_KM: '250000'
+          CAR_MAX_AGE_YEARS: '20'
+          CAR_LOCATION: 'calgary'
+        run: |
+          python car_alert.py
+
+      - name: Commit updated car tracker
+        continue-on-error: true
+        run: |
+          git config --local user.email "car-bot@github-actions"
+          git config --local user.name "YYC Car Bot"
+          git add car-tracker-seen.md
+          git diff --staged --quiet || git commit -m "chore: update car tracker [skip ci]"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push
