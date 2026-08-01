@@ -108,26 +108,9 @@ def _build_request(target_url):
 
 
 def _fetch(target_url, timeout=70):
-    """GET target_url (through the active provider). Returns HTML text or None."""
-    req, use_proxy, label = _build_request(target_url)
-    try:
-        with _opener(use_proxy).open(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", "replace")
-        except Exception:
-            pass
-        if e.code in (403, 429) and "captcha" in body.lower():
-            print(f"  [AutoTrader BLOCKED via {label}] HTTP {e.code} bot-protection. "
-                  f"Configure SCRAPINGBEE_API_KEY / SCRAPEDO_TOKEN or CAR_PROXY.")
-        else:
-            print(f"  [AutoTrader HTTP {e.code} via {label}] {e.reason} {body[:160]}")
-        return None
-    except Exception as e:
-        print(f"  [AutoTrader ERROR via {label}] {e}")
-        return None
+    """GET target_url through the shared scraper layer. HTML text or None."""
+    import scraper
+    return scraper.fetch(target_url, render=True, timeout=timeout)
 
 
 def _search_url(price_max, year_min, km_max, make=None, model=None, rcs=0, rcp=100):
@@ -260,8 +243,8 @@ def fetch_listings(models, price_max, year_min, km_max, max_pages=2, rcp=100, pa
     `models` is a list of (make, model_slug) pairs. Returns normalized dicts
     (see `_parse_card`), each also tagged with make/model.
     """
-    provider = _active_provider() or ("proxy" if CAR_PROXY else "direct")
-    print(f"  [AutoTrader] fetch mode: {provider} | "
+    import scraper
+    print(f"  [AutoTrader] fetch mode: {scraper.provider_label()} | "
           f"price<= {price_max:,} year>= {year_min} km<= {km_max:,} | "
           f"{len(models)} models")
 

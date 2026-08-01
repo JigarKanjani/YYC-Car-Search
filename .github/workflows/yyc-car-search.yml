@@ -33,11 +33,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHAT_ID_CARS: ${{ secrets.TELEGRAM_CHAT_ID_CARS }}
-          # Managed scraper (set ONE to get past AutoTrader.ca bot protection
-          # on GitHub's datacenter IPs). Reuse the same keys as the other bots.
+          # Managed scraper — set ANY ONE (all have free tiers). Auto-selected:
+          # ScrapingBee > Scrape.do > ScraperAPI > CAR_PROXY > direct.
+          # Force one with SCRAPER_PROVIDER (e.g. 'scrapedo') if another runs out.
+          SCRAPER_PROVIDER: ${{ secrets.SCRAPER_PROVIDER }}
           SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
           SCRAPEDO_TOKEN: ${{ secrets.SCRAPEDO_TOKEN }}
+          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
           CAR_PROXY: ${{ secrets.CAR_PROXY }}
+          # Sources
+          KIJIJI_ENABLED: '1'
           # Filters
           CAR_MAX_PRICE: '18000'
           CAR_MAX_KM: '180000'

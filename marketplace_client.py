@@ -53,34 +53,9 @@ def _provider():
 
 
 def _fetch(url):
-    """Fetch a Marketplace URL through the scraper (JS render). None on failure."""
-    provider = _provider()
-    if not provider:
-        print("  [Marketplace] no scraper key set — cannot fetch (needs residential IP).")
-        return None
-
-    if provider == "scrapingbee":
-        params = {"api_key": SCRAPINGBEE_API_KEY, "url": url,
-                  "premium_proxy": "true", "country_code": "ca", "render_js": "true"}
-        if FB_COOKIE:
-            params["forward_headers"] = "true"
-        api = SCRAPINGBEE_ENDPOINT + "?" + urllib.parse.urlencode(params)
-        headers = {"Spb-Cookie": FB_COOKIE} if FB_COOKIE else {}
-    else:
-        params = {"token": SCRAPEDO_TOKEN, "url": url, "super": "true",
-                  "geoCode": "ca", "render": "true"}
-        if FB_COOKIE:
-            params["customHeaders"] = "true"
-        api = SCRAPEDO_ENDPOINT + "?" + urllib.parse.urlencode(params)
-        headers = {"Cookie": FB_COOKIE} if FB_COOKIE else {}
-
-    try:
-        req = urllib.request.Request(api, headers=headers)
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            return resp.read().decode("utf-8", "replace")
-    except Exception as e:
-        print(f"  [Marketplace] fetch error: {e}")
-        return None
+    """Fetch a Marketplace URL through the shared scraper (JS render + cookie)."""
+    import scraper
+    return scraper.fetch(url, render=True, cookie=FB_COOKIE or None)
 
 
 def _looks_login_walled(html):

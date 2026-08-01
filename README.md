@@ -53,7 +53,9 @@ and a clickable listing link.
 | File | Role |
 |---|---|
 | `car_models.py` | Target models, reference prices, transmission/engine rules, the 1–10 scoring matrix |
-| `autotrader_client.py` | AutoTrader.ca per-model source adapter (via managed scraper) |
+| `scraper.py` | Shared managed-scraper fetch layer (ScrapingBee / Scrape.do / ScraperAPI / proxy / direct) |
+| `autotrader_client.py` | AutoTrader.ca per-model source adapter |
+| `kijiji_client.py` | Kijiji (Cars & Trucks, Calgary) adapter — parses `__NEXT_DATA__` |
 | `marketplace_client.py` | Facebook Marketplace adapter (experimental — see below) |
 | `car_alert.py` | Orchestrator: aggregate → filter → score → dedup → Telegram |
 | `car-tracker-seen.md` | Committed "already seen" state |
@@ -63,9 +65,21 @@ and a clickable listing link.
 
 1. Add Telegram secrets — `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID_CARS`
    (see `RECIPIENTS.md`).
-2. Add a managed-scraper key — `SCRAPINGBEE_API_KEY` or `SCRAPEDO_TOKEN` (same
-   keys as the other bots; required — AutoTrader blocks datacenter IPs).
+2. Add **any one** managed-scraper key (all have free tiers) — required, since
+   the sites block datacenter IPs:
+   - `SCRAPINGBEE_API_KEY` — [scrapingbee.com](https://www.scrapingbee.com)
+   - `SCRAPEDO_TOKEN` — [scrape.do](https://scrape.do) (1,000/mo free)
+   - `SCRAPERAPI_KEY` — [scraperapi.com](https://www.scraperapi.com) (1,000/mo free)
+   - or `CAR_PROXY` — your own residential proxy
+
+   Auto-selected in that order. If one runs out of credits, set
+   `SCRAPER_PROVIDER` (e.g. `scrapedo`) to force another, or just remove the
+   exhausted key. Sources: AutoTrader (reliable) + Kijiji + Facebook Marketplace.
 3. Run the **YYC Car Search** workflow (Actions tab) or wait for the cron.
+
+> **Credit budgeting:** every fetch is one scraper request. 7 models × 3 sources
+> × ~1 page × 4 runs/day ≈ hundreds/month. If you're on a 1,000/mo free tier,
+> either run less often (change the cron to every 12h) or trim models/sources.
 
 ## Tuning
 

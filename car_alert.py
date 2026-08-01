@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import autotrader_client
+import kijiji_client
 import marketplace_client
 from car_models import (WANTED, MODEL_META, model_key_from_title,
                         transmission_ok, engine_ok, is_cvt, is_manual, is_turbo,
@@ -214,8 +215,9 @@ def main():
         for cid in CHAT_IDS:
             tg_send(start_msg, cid)
 
-    # Gather from all sources.
+    # Gather from all sources (AutoTrader = reliable; Kijiji + Marketplace best-effort).
     listings = autotrader_client.fetch_listings(WANTED, args.max_price, year_min, args.max_km)
+    listings += kijiji_client.fetch_listings(WANTED, args.max_price, year_min, args.max_km)
     listings += marketplace_client.fetch_listings(WANTED, args.max_price, year_min, args.max_km)
     print(f"Combined: {len(listings)} raw listings from all sources")
 
