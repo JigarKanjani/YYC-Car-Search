@@ -1,72 +1,74 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-car_alert.py — Calgary Used-Car Telegram Sender.
+car_alert.py — Calgary steal-deal car finder → Telegram.
 
-Fetches Calgary used-car listings from AutoTrader.ca, deduplicates against a
-committed tracker file, applies the hard filters, and sends each new listing to
-Telegram directly (no LLM, no extra deps beyond BeautifulSoup for parsing).
+Aggregates used-car listings for a fixed set of models (Toyota Corolla / Camry /
+Yaris, Honda Civic / Accord, Mazda3 / Mazda6) from AutoTrader.ca (reliable) and
+Facebook Marketplace (experimental), applies hard filters, scores each 1-10, and
+sends only the strong deals (score ≥ 7) to Telegram — deduplicated by listing URL.
 
-Filters (all overridable via env / CLI):
-  • price   <= $18,000 CAD
-  • age     <= 20 years  (year >= current_year - 20, computed dynamically)
-  • odometer<= 250,000 km
-  • location = Calgary
+Filters:
+  • one of the target models
+  • price   ≤ $18,000 CAD
+  • mileage ≤ 180,000 km
+  • regular automatic only — no CVT, no manual, no turbo
+  • Calgary
+  • newly listed (dedup: only listings that appeared since the last scan)
+  • score ≥ 7 / 10
 
-"New" = "not seen before" (tracked by listing URL), so running every 6 hours
-surfaces whatever went up since last time.
-
-Usage: python car_alert.py [--max-price 18000] [--max-km 250000] [--max-age 20]
+Usage: python car_alert.py [--max-price 18000] [--max-km 180000] [--min-score 7]
 """
 
 import os
+import html
 import json
 import argparse
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
-from autotrader_client import fetch_listings
+import autotrader_client
+import marketplace_client
+from car_models import (WANTED, MODEL_META, model_key_from_title,
+                        transmission_ok, engine_ok, is_cvt, is_manual, is_turbo,
+                        score_car, CURRENT_YEAR)
 
 WORKSPACE    = Path(__file__).parent
 TRACKER_FILE = WORKSPACE / "car-tracker-seen.md"
 BOT_TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID      = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-# Filter defaults (overridable via env or CLI).
 MAX_PRICE = int(os.environ.get("CAR_MAX_PRICE", "18000"))
-MAX_KM    = int(os.environ.get("CAR_MAX_KM", "250000"))
+MAX_KM    = int(os.environ.get("CAR_MAX_KM", "180000"))
 MAX_AGE   = int(os.environ.get("CAR_MAX_AGE_YEARS", "20"))
-# Location substring a listing must match (lowercase). Set "" to allow all.
-LOCATION_MUST_MATCH = os.environ.get("CAR_LOCATION", "calgary").strip().lower()
-
-MAX_PER_RUN = 40   # safety cap on messages per run
+MIN_SCORE = float(os.environ.get("CAR_MIN_SCORE", "7"))
+# On the first ever run the tracker is empty; seed it silently instead of
+# blasting every current listing (honours "only newly listed").
+SEED_SILENT = os.environ.get("CAR_SEED_SILENT", "1") not in ("0", "", "false")
+MAX_PER_RUN = 40
 
 
 def parse_ids(raw):
     return [c.strip() for c in (raw or "").split(",") if c.strip()]
 
 
-# TELEGRAM_CHAT_ID_CARS may hold a comma-separated list; falls back to CHAT_ID.
 CHAT_IDS = parse_ids(os.environ.get("TELEGRAM_CHAT_ID_CARS")) or \
            (parse_ids(CHAT_ID) if CHAT_ID else [])
 
 
 def tg_send(text, chat_id):
-    """Send a plain-text message to Telegram. Auto-trims to 4000 chars."""
     if len(text) > 4000:
         text = text[:3990] + "..."
     payload = json.dumps({
-        "chat_id": str(chat_id),
-        "text": text,
-        "disable_web_page_preview": True,
+        "chat_id": str(chat_id), "text": text,
+        "parse_mode": "HTML", "disable_web_page_preview": True,
     }).encode("utf-8")
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data=payload,
-        headers={"Content-Type": "application/json; charset=utf-8"},
-    )
+        data=payload, headers={"Content-Type": "application/json; charset=utf-8"})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return resp.status == 200
@@ -82,149 +84,181 @@ def tg_send(text, chat_id):
         return False
 
 
-def load_seen_urls():
-    """Return set of listing URLs already sent."""
+def load_seen():
     seen = set()
     if not TRACKER_FILE.exists():
         TRACKER_FILE.write_text(
-            "| Year | Title | Price | KM | Location | Date | URL |\n"
-            "|------|-------|-------|----|----------|------|-----|\n",
-            encoding="utf-8",
-        )
+            "| Year | Model | Price | KM | Score | Source | Date | URL |\n"
+            "|------|-------|-------|----|-------|--------|------|-----|\n",
+            encoding="utf-8")
         return seen
     for line in TRACKER_FILE.read_text(encoding="utf-8").splitlines():
         parts = [p.strip() for p in line.split("|")]
-        if len(parts) >= 8 and parts[7].startswith("http"):
-            seen.add(parts[7])
+        if len(parts) >= 9 and parts[8].startswith("http"):
+            seen.add(parts[8])
     return seen
 
 
-def append_tracker(listing):
+def append_tracker(l, score):
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    row = (f"| {listing.get('year') or ''} | {listing['title'][:40]} | "
-           f"{listing['price']} | {listing['km']} | {listing['location'][:24]} | "
-           f"{date} | {listing['url']} |\n")
+    row = (f"| {l.get('year') or ''} | {MODEL_META.get(l.get('model_key'),{}).get('display','')[:20]} | "
+           f"{l.get('price')} | {l.get('km')} | {score} | {l.get('source')} | "
+           f"{date} | {l.get('url')} |\n")
     with open(TRACKER_FILE, "a", encoding="utf-8") as f:
         f.write(row)
 
 
-def passes_filters(listing, max_price, min_year, max_km):
-    """Apply the hard filters. Missing values are kept (don't silently drop),
-    except location which must positively match when a filter is set."""
-    p = listing.get("price_int")
-    if p is not None and p > max_price:
-        return False
-    y = listing.get("year")
-    if y is not None and y < min_year:
-        return False
-    k = listing.get("km_int")
-    if k is not None and k > max_km:
-        return False
-    if LOCATION_MUST_MATCH:
-        loc = (listing.get("location") or "").lower()
-        # If AutoTrader didn't surface a location string, keep it (the search is
-        # already Calgary-scoped); only drop when a location is present and wrong.
-        if loc and LOCATION_MUST_MATCH not in loc:
-            return False
-    return True
+def _esc(s):
+    return html.escape(str(s or ""))
 
 
-def format_message(listing):
-    title = listing["title"] or "Used car"
-    if listing.get("year") and str(listing["year"]) not in title:
-        title = f"{listing['year']} {title}"
+def evaluate(listing):
+    """Apply all filters + scoring. Returns (ok, score, expected, deal_pct, model_key)."""
+    title = listing.get("title", "")
+    text = " ".join([title, listing.get("desc", ""), listing.get("transmission", "")])
 
-    line_specs = []
-    if listing.get("km"):
-        line_specs.append(listing["km"])
-    if listing.get("year"):
-        line_specs.append(str(listing["year"]))
-    specs = " · ".join(line_specs)
+    model_key = listing.get("model") or model_key_from_title(title)
+    if not model_key or model_key not in MODEL_META:
+        return False, 0, None, None, None
+    # Ensure the listing really is this model (guards mis-tagged results).
+    if model_key not in title.lower().replace(" ", "") and model_key not in title.lower():
+        # AutoTrader per-model search is trustworthy; only enforce on Marketplace.
+        if listing.get("source") == "marketplace":
+            return False, 0, None, None, model_key
 
-    msg = (
-        f"🚗 {title}\n"
-        f"💰 {listing.get('price') or 'Price not listed'}\n"
-    )
-    if listing.get("location"):
-        msg += f"📍 {listing['location']}\n"
+    price = listing.get("price_int")
+    if not price or price > MAX_PRICE:
+        return False, 0, None, None, model_key
+
+    km = listing.get("km_int")
+    if km is None:                       # can't verify the ≤ MAX_KM rule
+        return False, 0, None, None, model_key
+    if km > MAX_KM:
+        return False, 0, None, None, model_key
+
+    year = listing.get("year")
+    if year and (CURRENT_YEAR - year) > MAX_AGE:
+        return False, 0, None, None, model_key
+
+    # Regular automatic only: no CVT, no manual, no turbo.
+    if not transmission_ok(text) or not engine_ok(text):
+        return False, 0, None, None, model_key
+
+    score, exp, dp = score_car(model_key, year, km, price)
+    if score < MIN_SCORE:
+        return False, score, exp, dp, model_key
+    return True, score, exp, dp, model_key
+
+
+def format_message(listing, score, expected, dp):
+    meta = MODEL_META.get(listing["model_key"], {})
+    title = listing.get("title") or meta.get("display", "Car")
+    stars = "⭐" * max(1, int(round(score / 2)))
+    year = listing.get("year")
+    age = f"{CURRENT_YEAR - year} yrs" if year else ""
+
+    price_disp = listing.get("price") or (f"${listing['price_int']:,}" if listing.get("price_int") else "n/a")
+    price_line = f"💰 <b>{_esc(price_disp)}</b>"
+    if expected and dp is not None and dp > 0.03:
+        price_line += f"  (est. fair ~${expected:,.0f} · {dp*100:.0f}% below)"
+    elif expected:
+        price_line += f"  (est. fair ~${expected:,.0f})"
+
+    km_disp = listing.get("km") or (f"{listing['km_int']:,} km" if listing.get("km_int") else "")
+    specs = " · ".join(x for x in [km_disp, age] if x)
+    src = "AutoTrader" if listing.get("source") == "autotrader" else "Marketplace"
+
+    lines = [
+        f"🚗 <b>{_esc(title)}</b>  ·  {stars} <b>{score}/10</b>",
+        price_line,
+    ]
     if specs:
-        msg += f"🛣️ {specs}\n"
-    msg += f"\n🔗 {listing['url']}"
-    return msg[:3900]
+        lines.append(f"🛣️ {_esc(specs)}")
+    lines.append(f"📍 {_esc(listing.get('location') or 'Calgary, AB')} · via {src}")
+    lines.append(f"🔗 <a href=\"{_esc(listing.get('url'))}\">View listing</a>")
+    return "\n".join(lines)[:3900]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Calgary Used-Car Alert Sender")
+    parser = argparse.ArgumentParser(description="Calgary steal-deal car finder")
     parser.add_argument("--max-price", type=int, default=MAX_PRICE)
     parser.add_argument("--max-km",    type=int, default=MAX_KM)
-    parser.add_argument("--max-age",   type=int, default=MAX_AGE)
+    parser.add_argument("--min-score", type=float, default=MIN_SCORE)
     args = parser.parse_args()
 
-    min_year = datetime.now().year - args.max_age
-
+    year_min = CURRENT_YEAR - MAX_AGE
     print(f"\n{'='*60}")
     print(f"YYC CAR SEARCH — {datetime.now().strftime('%Y-%m-%d %H:%M')} MST")
-    print(f"price<= ${args.max_price:,} | year>= {min_year} (<= {args.max_age}y) "
-          f"| km<= {args.max_km:,} | loc: {LOCATION_MUST_MATCH or 'any'}")
-    print(f"Recipients: {len(CHAT_IDS)}")
+    print(f"models: {len(WANTED)} | price<= ${args.max_price:,} | km<= {args.max_km:,} "
+          f"| no CVT/manual/turbo | score>= {args.min_score} | Recipients: {len(CHAT_IDS)}")
     print(f"{'='*60}")
 
     if not BOT_TOKEN:
         print("[ERROR] TELEGRAM_BOT_TOKEN not set — cannot send.")
     if not CHAT_IDS:
-        print("[ERROR] No recipients — set TELEGRAM_CHAT_ID_CARS or "
-              "TELEGRAM_CHAT_ID. Continuing (dry run).")
+        print("[ERROR] No recipients (TELEGRAM_CHAT_ID_CARS). Dry run.")
 
-    seen = load_seen_urls()
-    print(f"Tracker: {len(seen)} listings already seen")
+    seen = load_seen()
+    first_run = len(seen) == 0
+    print(f"Tracker: {len(seen)} listings already seen"
+          + (" (first run — will seed silently)" if first_run and SEED_SILENT else ""))
 
     start_msg = (
-        f"🚗 Calgary used-car scan started "
+        f"🚗 Calgary car steal-deal scan started "
         f"({datetime.now().strftime('%Y-%m-%d %H:%M')} MST)\n"
-        f"💰 ≤ ${args.max_price:,} · ≤ {args.max_age} yrs · ≤ {args.max_km:,} km · Calgary\n"
-        f"⏳ New matches will land here shortly."
+        f"🎯 Corolla/Camry/Yaris · Civic/Accord · Mazda3/6\n"
+        f"💰 ≤ ${args.max_price:,} · ≤ {args.max_km:,} km · auto (no CVT/turbo) · score ≥ {args.min_score:g}\n"
+        f"⏳ Only fresh deals will land here."
     )
-    for cid in CHAT_IDS:
-        tg_send(start_msg, cid)
+    if not (first_run and SEED_SILENT):
+        for cid in CHAT_IDS:
+            tg_send(start_msg, cid)
 
-    listings = fetch_listings(args.max_price, min_year, args.max_km)
+    # Gather from all sources.
+    listings = autotrader_client.fetch_listings(WANTED, args.max_price, year_min, args.max_km)
+    listings += marketplace_client.fetch_listings(WANTED, args.max_price, year_min, args.max_km)
+    print(f"Combined: {len(listings)} raw listings from all sources")
 
     sent = 0
-    for listing in listings:
+    for l in listings:
         if sent >= MAX_PER_RUN:
             break
-        url = listing.get("url")
+        url = l.get("url")
         if not url or url in seen:
             continue
-        if not passes_filters(listing, args.max_price, min_year, args.max_km):
+
+        ok, score, exp, dp, model_key = evaluate(l)
+        if not ok:
+            continue
+        l["model_key"] = model_key
+
+        # First-run seeding: record without alerting so we only ever message
+        # genuinely newly-listed cars afterwards.
+        seen.add(url)
+        append_tracker(l, score)
+        if first_run and SEED_SILENT:
             continue
 
-        msg = format_message(listing)
-        print(f"  -> {listing.get('year')} {listing['title']} | "
-              f"{listing['price']} | {listing['km']}")
-
+        msg = format_message(l, score, exp, dp)
+        print(f"  -> {score}/10 | {l.get('price')} | {l.get('km')} | {l.get('title')}")
         delivered = False
         for cid in CHAT_IDS:
             if tg_send(msg, cid):
                 delivered = True
-
-        seen.add(url)
-        append_tracker(listing)
         if delivered or not CHAT_IDS:
             sent += 1
 
-    summary_msg = (
-        f"✅ Calgary used-car scan done — "
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M')} MST\n"
-        f"{sent} new match(es) · ≤ ${args.max_price:,} · ≤ {args.max_age}y · "
-        f"≤ {args.max_km:,} km\n"
-        f"Source: AutoTrader.ca"
-    )
-    print(f"\n{summary_msg}")
+    if first_run and SEED_SILENT:
+        summary = (f"✅ Car bot ready — seeded {len(seen)} current listings "
+                   f"({datetime.now().strftime('%H:%M')} MST). "
+                   f"You'll get only NEW deals (score ≥ {args.min_score:g}) from here on.")
+    else:
+        summary = (f"✅ Car scan done — {datetime.now().strftime('%Y-%m-%d %H:%M')} MST\n"
+                   f"{sent} new deal(s) · ≤ ${args.max_price:,} · ≤ {args.max_km:,} km · score ≥ {args.min_score:g}")
+    print(f"\n{summary}")
     for cid in CHAT_IDS:
-        tg_send(summary_msg, cid)
-
-    print(f"{'='*60}\nDONE — {sent} new listings")
+        tg_send(summary, cid)
+    print(f"{'='*60}\nDONE — {sent} sent")
 
 
 if __name__ == "__main__":

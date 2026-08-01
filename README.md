@@ -1,93 +1,101 @@
-# YYC Car Search — Telegram Bot
+# YYC Car Search — Steal-Deal Telegram Bot
 
-A self-contained bot that scans **AutoTrader.ca** every 6 hours for new
-**used-car** listings in Calgary matching your criteria, and pushes each new one
-to Telegram. Same mechanism as the job/real-estate bots, for cars.
+Scans **AutoTrader.ca** (reliable) and **Facebook Marketplace** (experimental)
+every 6 hours for **underpriced** used cars of a fixed set of models in Calgary,
+scores each **1–10**, and Telegrams only the strong deals (**score ≥ 7**).
+Same mechanism as the job / real-estate bots.
 
-**Filters (all configurable):**
-- **Price:** ≤ $18,000 CAD
-- **Age:** ≤ 20 years old (year ≥ current year − 20, computed dynamically)
-- **Mileage:** ≤ 250,000 km
-- **Location:** Calgary
-- **Freshness:** "new" = not seen before, tracked by listing URL in a committed file
+## What it looks for
 
----
+**Models:** Toyota Corolla · Toyota Camry · Toyota Yaris · Honda Civic ·
+Honda Accord · Mazda3 · Mazda6
 
-## How it works
+**Hard filters:**
+- Price **≤ $18,000 CAD**
+- Mileage **≤ 180,000 km**
+- **Regular automatic only** — no CVT, no manual, no turbo
+- Calgary
+- **Newly listed** — only cars that appeared since the last scan (first run seeds
+  silently, so you only ever get genuinely new deals)
+- **Score ≥ 7 / 10**
+
+## The 1–10 scoring matrix
+
+Every candidate is scored on four axes (your three — model, km, age — plus the
+deal size that makes it a "steal"):
+
+| Component | Max | Basis |
+|---|---|---|
+| **Deal** | 4 | how far the price is below the model's estimated fair value |
+| **Mileage** | 3 | lower km scores higher |
+| **Age** | 2 | newer scores higher |
+| **Model** | 1 | reliability / resale desirability |
+
+Fair value comes from a per-model reference table (`car_models.py`) that
+estimates price by age + mileage — so a car priced well below its expected value
+scores high. Only **≥ 7** is sent. Tune the table and weights to taste.
+
+## Message
 
 ```
-GitHub Actions (cron, every 6h)
-        │
-        ▼
-car_alert.py ──► autotrader_client.py ──► AutoTrader.ca Calgary search
-        │                                     (price/year/odometer/location filters)
-        │
-        ├─ load seen URLs   (car-tracker-seen.md)
-        ├─ filter: price · age · mileage · location
-        ├─ send NEW listings ──► Telegram sendMessage
-        └─ append new URLs to tracker, commit back to repo
+🚗 2016 Honda Civic LX  ·  ⭐⭐⭐⭐ 8.0/10
+💰 $11,500  (est. fair ~$14,600 · 21% below)
+🛣️ 120,000 km · 10 yrs
+📍 Calgary, AB · via AutoTrader
+🔗 View listing
 ```
+
+Make/model, price (+ how far below fair value), mileage, age, location, source,
+and a clickable listing link.
+
+## Files
 
 | File | Role |
 |---|---|
-| `autotrader_client.py` | **Source adapter.** Fetches + parses AutoTrader.ca results. The only source-specific file — swap it for Kijiji / a managed actor and everything downstream is unchanged. |
-| `car_alert.py` | **Orchestrator.** Dedup against the tracker, filter, format, send to Telegram. |
-| `car-tracker-seen.md` | **Memory.** Committed table of every listing URL ever sent; makes "new" work across stateless runs. |
-| `.github/workflows/yyc-car-search.yml` | **Scheduler.** 6-hour cron + manual trigger; commits the tracker back. |
-
----
+| `car_models.py` | Target models, reference prices, transmission/engine rules, the 1–10 scoring matrix |
+| `autotrader_client.py` | AutoTrader.ca per-model source adapter (via managed scraper) |
+| `marketplace_client.py` | Facebook Marketplace adapter (experimental — see below) |
+| `car_alert.py` | Orchestrator: aggregate → filter → score → dedup → Telegram |
+| `car-tracker-seen.md` | Committed "already seen" state |
+| `.github/workflows/yyc-car-search.yml` | 6-hour cron + manual trigger |
 
 ## Setup
 
-1. Add Telegram secrets — see [`RECIPIENTS.md`](./RECIPIENTS.md).
-   At minimum `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID_CARS`.
-2. Add a managed-scraper key (`SCRAPINGBEE_API_KEY` or `SCRAPEDO_TOKEN`) — the
-   same keys used by the real-estate bot work here. AutoTrader.ca blocks
-   datacenter IPs, so this is required on GitHub Actions.
-3. Enable Actions and run the **YYC Car Search** workflow (Actions tab), or wait
-   for the 6-hour cron.
-
-## Run locally
-
-```bash
-pip install -r requirements.txt
-export TELEGRAM_BOT_TOKEN=...        # optional for a dry run
-export TELEGRAM_CHAT_ID_CARS=...     # optional for a dry run
-python car_alert.py --max-price 18000 --max-km 250000 --max-age 20
-```
-
-With no recipients set it does a **dry run** (fetch + print + track, no messages).
-Test just the fetch/parse layer: `python autotrader_client.py`.
-
----
+1. Add Telegram secrets — `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID_CARS`
+   (see `RECIPIENTS.md`).
+2. Add a managed-scraper key — `SCRAPINGBEE_API_KEY` or `SCRAPEDO_TOKEN` (same
+   keys as the other bots; required — AutoTrader blocks datacenter IPs).
+3. Run the **YYC Car Search** workflow (Actions tab) or wait for the cron.
 
 ## Tuning
 
 | What | Where |
 |---|---|
-| Price / mileage / age | `--max-price/--max-km/--max-age`, or `CAR_MAX_PRICE` / `CAR_MAX_KM` / `CAR_MAX_AGE_YEARS` env (set in the workflow) |
-| Location match | `CAR_LOCATION` env (default `calgary`; empty = any within search radius) |
-| Search radius | `prx` in `autotrader_client._search_url` (km around Calgary) |
-| Cron cadence | `.github/workflows/yyc-car-search.yml` |
+| Models | `WANTED` in `car_models.py` |
+| Reference prices / desirability | `MODEL_META` in `car_models.py` |
+| Score threshold | `CAR_MIN_SCORE` env (default `7`) |
+| Price / mileage / age | `CAR_MAX_PRICE` / `CAR_MAX_KM` / `CAR_MAX_AGE_YEARS` env |
+| Scoring weights | `score_car()` in `car_models.py` |
 
----
+## Facebook Marketplace (experimental)
 
-## Data-source note
+Marketplace is **disabled by default** and is a best-effort bonus source.
+Facebook aggressively blocks bots and usually shows a **login wall** to
+unauthenticated requests, so without a logged-in session you'll typically get 0
+results (logged clearly, not a crash).
 
-AutoTrader.ca is Canada's largest used-car marketplace and supports the exact
-filters we need (price/year/odometer/location) via URL params. It blocks
-datacenter IPs, so requests route through a **managed scraper** (ScrapingBee or
-Scrape.do — same keys as the other bots), auto-selected in this order and
-printed at run start as `[AutoTrader] fetch mode: ...`:
+To try it: set `FB_MARKETPLACE_ENABLED=1`, and for it to actually return data set
+`FB_COOKIE` to a logged-in Facebook session cookie (forwarded to the scraper).
+Even then it's fragile and may break when Facebook changes their markup.
+**AutoTrader is the reliable backbone; treat Marketplace as extra.**
 
-| Priority | Configure | Mode |
-|---|---|---|
-| 1 | `SCRAPINGBEE_API_KEY` | ScrapingBee (`premium_proxy`, `country_code=ca`, JS render) |
-| 2 | `SCRAPEDO_TOKEN` | Scrape.do (`super`, `geoCode=ca`, render) |
-| 3 | `CAR_PROXY` | your own residential proxy |
-| 4 | *(nothing)* | direct — only works from a residential IP |
+## Notes on limitations (honest)
 
-The parser keys on human-readable patterns (`$`, `km`, 4-digit year) so it's
-resilient to AutoTrader's HTML class-name changes. If a future markup change
-returns 0 listings, the fetch-mode line still prints — check the log and the
-selectors in `autotrader_client._parse_listings` may need one tweak.
+- **CVT / turbo detection** is keyword-based on the listing text. A CVT or turbo
+  car whose listing never says so can slip through; the gate reliably drops ones
+  that *do* say "CVT"/"turbo"/"manual".
+- **Freshness** relies on "new since last scan" (dedup) because AutoTrader's
+  search cards don't carry a precise list time. With a 6-hour cron that keeps
+  alerts well within your 12-hour intent.
+- **Reference prices** are rough estimates — calibrate `MODEL_META` against what
+  you see in the market.

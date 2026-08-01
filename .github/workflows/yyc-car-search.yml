@@ -40,9 +40,13 @@ jobs:
           CAR_PROXY: ${{ secrets.CAR_PROXY }}
           # Filters
           CAR_MAX_PRICE: '18000'
-          CAR_MAX_KM: '250000'
+          CAR_MAX_KM: '180000'
           CAR_MAX_AGE_YEARS: '20'
-          CAR_LOCATION: 'calgary'
+          CAR_MIN_SCORE: '7'
+          CAR_SEED_SILENT: '1'      # first run seeds silently, then only new deals
+          # Facebook Marketplace (experimental — usually needs a logged-in cookie)
+          FB_MARKETPLACE_ENABLED: ${{ secrets.FB_MARKETPLACE_ENABLED }}
+          FB_COOKIE: ${{ secrets.FB_COOKIE }}
         run: |
           python car_alert.py
 

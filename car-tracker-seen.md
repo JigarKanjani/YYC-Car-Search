@@ -1,2 +1,2 @@
-| Year | Title | Price | KM | Location | Date | URL |
-|------|-------|-------|----|----------|------|-----|
+| Year | Model | Price | KM | Score | Source | Date | URL |
+|------|-------|-------|----|-------|--------|------|-----|

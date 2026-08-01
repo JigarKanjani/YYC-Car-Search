@@ -130,7 +130,7 @@ def _fetch(target_url, timeout=70):
         return None
 
 
-def _search_url(price_max, year_min, km_max, rcs=0, rcp=100):
+def _search_url(price_max, year_min, km_max, make=None, model=None, rcs=0, rcp=100):
     """Build an AutoTrader.ca Calgary search URL with our filters.
 
     Ranges are 'min,max' with either side optional:
@@ -151,7 +151,10 @@ def _search_url(price_max, year_min, km_max, rcs=0, rcp=100):
         "wcp": "True",
         "inMarket": "advancedSearch",
     }
-    return SEARCH_BASE + "?" + urllib.parse.urlencode(params)
+    base = SEARCH_BASE
+    if make and model:
+        base = f"{SITE_BASE}/cars/{make}/{model}/ab/calgary/"
+    return base + "?" + urllib.parse.urlencode(params)
 
 
 # ── Parsing helpers ──────────────────────────────────────────────────────────
@@ -194,6 +197,9 @@ def _parse_card(card):
     loc_matches = re.findall(r"([A-Z][A-Za-z .'-]*?,\s*AB)\b", text)
     loc = loc_matches[-1].strip() if loc_matches else ""
 
+    # Transmission hint if the card text mentions it.
+    tm = re.search(r"\b(cvt|automatic|manual|[0-9]+\s*-?\s*speed)\b", text, re.I)
+
     return {
         "id":       href.rstrip("/").split("/")[-1],
         "title":    title,
@@ -204,6 +210,9 @@ def _parse_card(card):
         "year":     int(year_m.group(1)) if year_m else None,
         "location": loc,
         "url":      href.split("?")[0],
+        "transmission": tm.group(0) if tm else "",
+        "desc":     text[:400],       # card text for CVT/turbo keyword scanning
+        "source":   "autotrader",
     }
 
 
@@ -245,44 +254,52 @@ def _parse_listings(html):
     return listings
 
 
-def fetch_listings(price_max, year_min, km_max, max_pages=3, rcp=100, pause=1.0):
-    """Fetch Calgary used-car listings matching the filters.
+def fetch_listings(models, price_max, year_min, km_max, max_pages=2, rcp=100, pause=1.0):
+    """Fetch Calgary used-car listings for each (make, model) in `models`.
 
-    Returns a list of normalized listing dicts (see `_parse_card`).
+    `models` is a list of (make, model_slug) pairs. Returns normalized dicts
+    (see `_parse_card`), each also tagged with make/model.
     """
     provider = _active_provider() or ("proxy" if CAR_PROXY else "direct")
     print(f"  [AutoTrader] fetch mode: {provider} | "
-          f"price<= {price_max:,} year>= {year_min} km<= {km_max:,}")
+          f"price<= {price_max:,} year>= {year_min} km<= {km_max:,} | "
+          f"{len(models)} models")
 
     listings, seen = [], set()
-    for page in range(max_pages):
-        url = _search_url(price_max, year_min, km_max, rcs=page * rcp, rcp=rcp)
-        print(f"  [AutoTrader] page {page + 1}...")
-        html = _fetch(url)
-        if not html:
-            break
-        page_rows = _parse_listings(html)
-        if not page_rows:
-            break
-        new = 0
-        for row in page_rows:
-            if row["url"] not in seen:
-                seen.add(row["url"])
-                listings.append(row)
-                new += 1
-        print(f"    -> {len(page_rows)} cards ({new} new)")
-        if new == 0:
-            break
-        time.sleep(pause)
+    for make, model in models:
+        got = 0
+        for page in range(max_pages):
+            url = _search_url(price_max, year_min, km_max, make=make, model=model,
+                              rcs=page * rcp, rcp=rcp)
+            html = _fetch(url)
+            if not html:
+                break
+            page_rows = _parse_listings(html)
+            if not page_rows:
+                break
+            new = 0
+            for row in page_rows:
+                if row["url"] not in seen:
+                    seen.add(row["url"])
+                    row["make"] = make
+                    row["model"] = model
+                    listings.append(row)
+                    new += 1
+                    got += 1
+            if new == 0:
+                break
+            time.sleep(pause)
+        print(f"  [AutoTrader] {make} {model}: {got} listings")
 
-    print(f"  [AutoTrader] {len(listings)} unique listings fetched")
+    print(f"  [AutoTrader] {len(listings)} total unique listings fetched")
     return listings
 
 
 if __name__ == "__main__":
     from datetime import datetime
     yr_min = datetime.now().year - 20
-    got = fetch_listings(18000, yr_min, 250000, max_pages=1)
+    got = fetch_listings([("toyota", "corolla"), ("honda", "civic")],
+                         18000, yr_min, 180000, max_pages=1)
     for l in got[:8]:
         print(f"  {l['year']} | {l['price']} | {l['km']} | {l['location']} | {l['title']}")
     print(f"Total: {len(got)}")
