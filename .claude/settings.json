@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'STANDING RULES (CLAUDE.md): (1) Any web development/design work: invoke the hallmark skill FIRST via the Skill tool. (2) After building ANY tool, app, script or software: invoke the security-audit skill automatically in full audit mode and run the project tests, then fix confirmed findings. Do not skip either; the user has pre-authorised both.'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/hallmark/scripts/lint-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
