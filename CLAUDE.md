@@ -33,3 +33,35 @@ app, tool, script, scraper, API, or a significant change to one), and before rep
    as `needs_validation`) in the hand-off message.
 
 Keep audit artifacts out of version control unless asked (write them to a scratch dir).
+
+## 3. Citing sources: always use Academic Research Skills (ARS)
+
+[Academic Research Skills](https://github.com/Imbad0202/academic-research-skills) is vendored at
+`.claude/academic-research-skills/` (pinned commit in its `VENDORED.md`), and its five skills are
+linked into `.claude/skills/`. **Whenever work cites resources**, invoke the matching ARS skill via
+the Skill tool before writing. That covers any answer, report, doc, README, code comment or other
+deliverable that cites, quotes or lists sources; finding or recommending sources; building a
+bibliography or reference list; fact-checking claims against sources; and checking or reformatting
+existing citations. Pick the lightest mode that fits (modes: `MODE_REGISTRY.md` in the ARS folder):
+
+| Task | Skill → mode |
+|---|---|
+| Find sources for a question, or a short cited answer | `deep-research` → `quick` (`full` for a full report) |
+| Verify claims against sources | `deep-research` → `fact-check` |
+| Literature review / annotated bibliography | `deep-research` → `lit-review` (`academic-paper` → `lit-review` for paper format) |
+| Check, verify or fix a reference list | `academic-paper` → `citation-check` |
+| Convert citation style or document format | `academic-paper` → `format-convert` |
+| Write a paper / review a paper / run the full pipeline | `academic-paper` / `academic-paper-reviewer` / `academic-pipeline` |
+| Screen studies for a systematic review | `sr-screener` |
+
+- Never invent or guess a citation. Confirm each cited work exists (DOI, URL or index lookup)
+  before giving it; label anything you could not confirm as unverified.
+- Default to APA 7 unless the user or venue names another style.
+- `deep-research` here means the ARS skill, not the account-level `anthropic-skills:deep-research`.
+- Paths inside ARS files (`shared/…`, `scripts/…`, `docs/…`, `MODE_REGISTRY.md`) are relative to
+  `.claude/academic-research-skills/`, not this repo's root.
+- Don't hand-edit the vendored files. To update, run
+  `.claude/scripts/sync-academic-research-skills.sh <full-40-char-commit-sha>`, review the diff,
+  and run the rule 2 audit on it. Local security fixes live in `.claude/scripts/ars-patches/` and
+  are re-applied on every sync; if one stops applying, check whether upstream fixed it and delete it.
+- ARS is licensed CC BY-NC 4.0: non-commercial use only, keep the attribution.
