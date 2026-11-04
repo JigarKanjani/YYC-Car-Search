@@ -193,6 +193,8 @@ class OpenAlexClient:
         """DOI lookup with mandatory Levenshtein 0.70 title cross-check."""
         quoted_doi = urllib.parse.quote(doi, safe="")
         data = self._get(f"/works/doi:{quoted_doi}", {"select": _FIELDS})
+        if not data:  # 404 -> empty dict from _get: a miss (local patch 0002)
+            return None
         title = data.get("title") or ""
         if _similarity(title, expected_title) >= _TITLE_SIMILARITY_THRESHOLD:
             return data

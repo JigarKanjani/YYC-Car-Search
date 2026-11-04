@@ -1,0 +1,44 @@
+--- a/scripts/openalex_client.py
++++ b/scripts/openalex_client.py
+@@ -193,6 +193,8 @@
+         """DOI lookup with mandatory Levenshtein 0.70 title cross-check."""
+         quoted_doi = urllib.parse.quote(doi, safe="")
+         data = self._get(f"/works/doi:{quoted_doi}", {"select": _FIELDS})
++        if not data:  # 404 -> empty dict from _get: a miss (local patch 0002)
++            return None
+         title = data.get("title") or ""
+         if _similarity(title, expected_title) >= _TITLE_SIMILARITY_THRESHOLD:
+             return data
+--- a/scripts/_text_similarity.py
++++ b/scripts/_text_similarity.py
+@@ -232,6 +232,10 @@
+     replaced the base form). For non-dotted titles both forms are byte-equal, so
+     the second pass is skipped and the result is the pre-#431 single-form ratio."""
+     a_base, b_base = _normalize_title(a), _normalize_title(b)
++    if not a_base or not b_base:
++        # Local patch 0002: '' vs '' scores 1.0 in SequenceMatcher, which let a
++        # punctuation-only title "match" a 404 or untitled record.
++        return 0.0
+     base = SequenceMatcher(None, a_base, b_base).ratio()
+     # CJK repair: the DOI-keyed cross-check in every resolver gates on this
+     # ratio ALONE, and a legitimate fullwidth spelling of an identical Chinese
+@@ -260,6 +264,8 @@
+     variants all match here; a distinct related work (different subtitle, Part I
+     vs Part II, a correction-notice prefix) matches under neither and stays
+     `unresolvable` rather than a false `matched`."""
++    if not _normalize_title(a) or not _normalize_title(b):
++        return False  # local patch 0002: empty titles never identify a work
+     return (
+         _normalize_title(a) == _normalize_title(b)
+         or _normalize_title_acronym(a) == _normalize_title_acronym(b)
+--- a/scripts/check_claim_standing_candidate_ledger_integration.py
++++ b/scripts/check_claim_standing_candidate_ledger_integration.py
+@@ -32,7 +32,7 @@
+ )
+ RESOLVER_HASHES = {
+     Path("scripts/semantic_scholar_client.py"): "86e2c3d713804d0e9f4d095e245db0521afb0d198686434515a0c1b225d0f787",
+-    Path("scripts/openalex_client.py"): "e90207a2b591a385dab61a55a86a92a6623cb60c428edce360a4199947209cda",
++    Path("scripts/openalex_client.py"): "df942a372c081313455471640010aa35599b1fdb4faf4de119667221ca64c8fc",
+     Path("scripts/crossref_client.py"): "06da046164f882e20383cd63ec9e9b6da2507d7a5e1f23066adebb88f2256e25",
+     Path("scripts/arxiv_client.py"): "94164ac4cf9fbe3e364c5bef1090a81a7f66265857303146358b912c7e7c58b6",
+ }

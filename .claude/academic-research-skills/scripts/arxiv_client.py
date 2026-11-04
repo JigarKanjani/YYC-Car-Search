@@ -51,7 +51,30 @@ except ImportError:
     )
 
 
-_API_BASE = "http://export.arxiv.org/api/query"
+_API_BASE = "https://export.arxiv.org/api/query"
+_API_HOST = "export.arxiv.org"
+
+
+def _require_api_url(url: str) -> None:
+    """Local patch (YYC-Car-Search, ars-patches/0001): pin scheme and host like
+    the Crossref/OpenAlex/Semantic Scholar clients, so an on-path party cannot
+    forge or redirect the arXiv evidence behind a citation-existence verdict."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.netloc != _API_HOST:
+        raise ArxivUnavailable(
+            f"Refusing non-arXiv API URL: {parsed.scheme}://{parsed.netloc}{parsed.path}"
+        )
+
+
+class _PinnedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-check the pin on every redirect hop (urllib follows cross-host 3xx)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _require_api_url(urllib.parse.urljoin(req.full_url, newurl))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_PinnedRedirectHandler)
 _ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
 # arXiv API Terms of Use ask callers to pace requests ~3s apart.
@@ -113,6 +136,7 @@ class ArxivClient:
         url = _API_BASE
         if query:
             url += "?" + urllib.parse.urlencode(query)
+        _require_api_url(url)
         req = urllib.request.Request(url, headers={"User-Agent": self._user_agent})
 
         self._throttle()
@@ -120,7 +144,7 @@ class ArxivClient:
 
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                with _OPENER.open(req, timeout=30) as resp:
                     # Wrap read + parse in a narrow except so transient socket
                     # drops mid-stream and truncated / malformed bodies surface
                     # as ArxivUnavailable -- honoring the per-API degradation

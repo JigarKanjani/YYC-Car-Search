@@ -61,6 +61,7 @@ existing citations. Pick the lightest mode that fits (modes: `MODE_REGISTRY.md` 
 - Paths inside ARS files (`shared/…`, `scripts/…`, `docs/…`, `MODE_REGISTRY.md`) are relative to
   `.claude/academic-research-skills/`, not this repo's root.
 - Don't hand-edit the vendored files. To update, run
-  `.claude/scripts/sync-academic-research-skills.sh <commit-sha>`, review the diff, and run the
-  rule 2 audit on it.
+  `.claude/scripts/sync-academic-research-skills.sh <full-40-char-commit-sha>`, review the diff,
+  and run the rule 2 audit on it. Local security fixes live in `.claude/scripts/ars-patches/` and
+  are re-applied on every sync; if one stops applying, check whether upstream fixed it and delete it.
 - ARS is licensed CC BY-NC 4.0: non-commercial use only, keep the attribution.

@@ -232,6 +232,10 @@ def _similarity(a: str, b: str) -> float:
     replaced the base form). For non-dotted titles both forms are byte-equal, so
     the second pass is skipped and the result is the pre-#431 single-form ratio."""
     a_base, b_base = _normalize_title(a), _normalize_title(b)
+    if not a_base or not b_base:
+        # Local patch 0002: '' vs '' scores 1.0 in SequenceMatcher, which let a
+        # punctuation-only title "match" a 404 or untitled record.
+        return 0.0
     base = SequenceMatcher(None, a_base, b_base).ratio()
     # CJK repair: the DOI-keyed cross-check in every resolver gates on this
     # ratio ALONE, and a legitimate fullwidth spelling of an identical Chinese
@@ -260,6 +264,8 @@ def exact_normalized_title(a: str, b: str) -> bool:
     variants all match here; a distinct related work (different subtitle, Part I
     vs Part II, a correction-notice prefix) matches under neither and stays
     `unresolvable` rather than a false `matched`."""
+    if not _normalize_title(a) or not _normalize_title(b):
+        return False  # local patch 0002: empty titles never identify a work
     return (
         _normalize_title(a) == _normalize_title(b)
         or _normalize_title_acronym(a) == _normalize_title_acronym(b)

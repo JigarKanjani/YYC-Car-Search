@@ -1,0 +1,11 @@
+--- a/scripts/contamination_signals.py
++++ b/scripts/contamination_signals.py
+@@ -43,7 +43,7 @@
+ # returned as `matched` with `client.title_search` never called, bypassing the
+ # v5 loop entirely — a dangerous false-positive surviving the pivot for up to the
+ # 90-day TTL. A row whose stored version is absent or != this constant is a MISS.
+-RESOLVER_DECISION_VERSION = "431-v5"
++RESOLVER_DECISION_VERSION = "431-v5+yyc-p1"  # local patches 0001/0002: re-resolve verdicts cached before them
+ 
+ 
+ # 10-venue closed list per v3.7.3 spec §3.2 + schema description.

@@ -32,9 +32,9 @@ FIXTURES = (
 )
 RESOLVER_HASHES = {
     Path("scripts/semantic_scholar_client.py"): "86e2c3d713804d0e9f4d095e245db0521afb0d198686434515a0c1b225d0f787",
-    Path("scripts/openalex_client.py"): "e90207a2b591a385dab61a55a86a92a6623cb60c428edce360a4199947209cda",
+    Path("scripts/openalex_client.py"): "df942a372c081313455471640010aa35599b1fdb4faf4de119667221ca64c8fc",
     Path("scripts/crossref_client.py"): "06da046164f882e20383cd63ec9e9b6da2507d7a5e1f23066adebb88f2256e25",
-    Path("scripts/arxiv_client.py"): "76ace0911bf98b1a288e64ee41f4c2caf993b9df48ef3abb0c57b8446acf02a7",
+    Path("scripts/arxiv_client.py"): "94164ac4cf9fbe3e364c5bef1090a81a7f66265857303146358b912c7e7c58b6",
 }
 ALLOWED_RUNTIME_DIRECT_IMPORTS = {
     "argparse",
