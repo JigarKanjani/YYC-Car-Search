@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'STANDING RULES (CLAUDE.md): (1) Any web development/design work: invoke the hallmark skill FIRST via the Skill tool. (2) After building ANY tool, app, script or software: invoke the security-audit skill automatically in full audit mode and run the project tests, then fix confirmed findings. Do not skip either; the user has pre-authorised both.'"
+            "command": "echo 'STANDING RULES (CLAUDE.md): (1) Any web development/design work: invoke the hallmark skill FIRST via the Skill tool. (2) After building ANY tool, app, script or software: invoke the security-audit skill automatically in full audit mode and run the project tests, then fix confirmed findings. (3) Any work that cites, quotes, lists, finds or checks sources/references: invoke the matching Academic Research Skills skill FIRST (deep-research, academic-paper, academic-paper-reviewer, academic-pipeline or sr-screener; lightest fitting mode) and never give an unverified citation as verified. Do not skip any of these; the user has pre-authorised all three.'"
           }
         ]
       }
