@@ -5,6 +5,7 @@
 #   reactbits                hwj23016021425/reactbits-claude-skill  MIT (per its README)
 #   motionsites-web-builder  Motionsites-AI/claude-skill            MIT; examples/ and media/ (c) MotionSites
 #   unslop                   heydamir/unslop                        CC BY 4.0, credit Damir Sokolovsky
+#                            (+ local security patch to scripts/story.mjs, noted in its INSTALLED_FROM)
 #
 # It also installs the ReactBits MCP server (npm reactbits-dev-mcp-server, pinned version and tarball
 # hash), which the reactbits skill drives, into a fixed directory and registers it at user scope by
@@ -35,6 +36,23 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$DEST" || exit 1
 failed=0
 
+# Local security patch for unslop (audit finding: its story.mjs loopback file server answered any
+# local process). Adds a per-run token that only the story browser sends; applied after the pin check.
+patch_unslop() {
+  git -C "$1" apply --unidiff-zero - <<'EOF'
+--- a/skills/unslop/scripts/story.mjs
++++ b/skills/unslop/scripts/story.mjs
+@@ -6,0 +7 @@
++import { randomBytes } from "node:crypto"; // local patch: per-run token for the story server
+@@ -382,0 +384 @@
++const token = randomBytes(16).toString("hex");
+@@ -383,0 +386 @@
++  if (request.headers["x-story-token"] !== token || request.headers.host !== `127.0.0.1:${server.address().port}`) { response.writeHead(403); return response.end(); }
+@@ -414,0 +418 @@
++  await page.setExtraHTTPHeaders({ "x-story-token": token });
+EOF
+}
+
 # Fetch one pinned commit, check it, and copy only the skill folder into place.
 install_skill() {
   local name="$1" url="$2" sha="$3" path="$4" license="$5"
@@ -46,11 +64,13 @@ install_skill() {
   [ -f "$src/$path/SKILL.md" ] || { echo "$name: no SKILL.md at $path" >&2; return 1; }
   # Symlinks in fetched content could point the copy (or the writes below) outside the skill folder.
   [ -z "$(find "$src/$path" -type l -print -quit)" ] || { echo "$name: skill folder has symlinks" >&2; return 1; }
+  if [ "$name" = unslop ]; then patch_unslop "$src" || { echo "unslop: local patch did not apply" >&2; return 1; }; fi
   cp -R "$src/$path" "$out" && rm -f "$out/LICENSE" "$out/INSTALLED_FROM" || return 1
   if [ "$license" != "-" ]; then
     [ -f "$src/$license" ] && [ ! -L "$src/$license" ] && cp "$src/$license" "$out/LICENSE" || return 1
   fi
   printf 'Installed from %s at commit %s\n' "$url" "$sha" > "$out/INSTALLED_FROM" || return 1
+  [ "$name" != unslop ] || echo "Local patch: scripts/story.mjs story server requires a per-run token" >> "$out/INSTALLED_FROM"
   # Swap in only a complete copy, so a failed copy never leaves the skill missing or half-written.
   rm -rf "$stage" && cp -R "$out" "$stage" || { rm -rf "$stage"; return 1; }
   rm -rf "${DEST:?}/$name" && mv "$stage" "$DEST/$name"
