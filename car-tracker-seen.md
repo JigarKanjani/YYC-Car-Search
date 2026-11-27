@@ -6,3 +6,4 @@
 | 2013 | Toyota Corolla | $10,800 | 74,000 km | 7.0 | kijiji | 2026-08-25 | https://www.kijiji.ca/v-cars-trucks/calgary/2013-toyota-corolla-74-000km/1742500452 |
 | 2018 | Honda Civic | $16,000 | 86,000 km | 7.5 | kijiji | 2026-08-31 | https://www.kijiji.ca/v-cars-trucks/calgary/2018-honda-civic-coupe-86-000km/1742794954 |
 | 2019 | Toyota Corolla | $17,500 | 47,000 km | 8.0 | kijiji | 2026-10-25 | https://www.kijiji.ca/v-cars-trucks/calgary/2019-toyota-corolla-xle-only-47-000-km/1743071214 |
+| 2017 | Honda Civic | $13,000 | 110,750 km | 7.5 | kijiji | 2026-11-27 | https://www.kijiji.ca/v-cars-trucks/calgary/2017-honda-civic-ex-t-2-door-coupe-110-750-km/1746726011 |
